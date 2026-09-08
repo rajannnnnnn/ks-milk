@@ -1,0 +1,533 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  DELIVERY_PERSON
+}
+
+model User {
+  id           String   @id @default(cuid())
+  role         Role
+  // Nullable to support Google SSO signup, which starts from an email/Google
+  // identity rather than a mobile number. Postgres treats multiple NULLs as
+  // distinct, so uniqueness still holds for the rows that do have one.
+  mobile       String?  @unique
+  email        String?  @unique
+  // Nullable for SSO-only accounts (no password set); password login checks
+  // this is non-null before comparing.
+  passwordHash String?
+  googleId     String?  @unique
+  name         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer       Customer?
+  admin          Admin?
+  deliveryPerson DeliveryPerson?
+  refreshTokens  RefreshToken[]
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses     Address[]
+  orders        Order[]
+  subscriptions Subscription[]
+  bills         Bill[]
+  payments      Payment[]
+  notifications Notification[]
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model DeliveryPerson {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  assignments DeliveryAssignment[]
+}
+
+// ---------------------------------------------------------------------------
+// Addresses
+// ---------------------------------------------------------------------------
+
+model Address {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label       String?
+  name        String
+  mobile      String
+  houseNo     String
+  street      String
+  area        String
+  city        String
+  pincode     String
+  latitude    Float
+  longitude   Float
+  isDefault   Boolean  @default(false)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders             Order[]
+  subscriptions      Subscription[]
+
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// Products
+// ---------------------------------------------------------------------------
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Product {
+  id                      String        @id @default(cuid())
+  name                    String
+  description             String?
+  imageUrl                String?
+  unit                    String
+  status                  ProductStatus @default(ACTIVE)
+  subscriptionAvailable   Boolean       @default(true)
+  availableQuantity       Int           @default(0)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  prices              ProductPrice[]
+  orderItems          OrderItem[]
+  subscriptionItems   SubscriptionItem[]
+  subscriptions       Subscription[]
+
+  @@index([status])
+}
+
+// Full price history. The currently effective price is the latest row with
+// effectiveFrom <= now (and effectiveTo null or in the future). Historical
+// orders/deliveries store the price actually applied at that time (Rule 7),
+// they never dereference this table after the fact.
+model ProductPrice {
+  id            String    @id @default(cuid())
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price         Decimal   @db.Decimal(10, 2)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([productId, effectiveFrom])
+}
+
+// ---------------------------------------------------------------------------
+// One-time orders
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  PLACED
+  CONFIRMED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  FAILED
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  customerId       String
+  customer         Customer    @relation(fields: [customerId], references: [id])
+  addressId        String
+  address          Address     @relation(fields: [addressId], references: [id])
+  // Address snapshot, retained even if the customer edits/deletes the address later.
+  addressSnapshot  Json
+  status            OrderStatus @default(PLACED)
+  scheduledDeliveryDate DateTime
+  deliveryWindowStart   String
+  deliveryWindowEnd     String
+  subtotal         Decimal     @db.Decimal(10, 2)
+  deliveryCharge   Decimal     @db.Decimal(10, 2) @default(0)
+  taxAmount        Decimal     @db.Decimal(10, 2) @default(0)
+  totalAmount      Decimal     @db.Decimal(10, 2)
+  cancelledAt      DateTime?
+  cancelReason     String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  items      OrderItem[]
+  delivery   DeliveryAssignment?
+  payment    Payment?
+
+  @@index([customerId])
+  @@index([status])
+  @@index([scheduledDeliveryDate])
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  productName String
+  unit        String
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  lineTotal   Decimal  @db.Decimal(10, 2)
+
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+enum SubscriptionPlan {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum SubscriptionFrequency {
+  DAILY
+  // Reserved for future expansion (Rule: architecture must allow this
+  // without redesign): ALTERNATE_DAYS, SELECTED_WEEKDAYS, CUSTOM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+model Subscription {
+  id           String                 @id @default(cuid())
+  customerId   String
+  customer     Customer               @relation(fields: [customerId], references: [id])
+  addressId    String
+  address      Address                @relation(fields: [addressId], references: [id])
+  addressSnapshot Json
+  productId    String
+  product      Product                @relation(fields: [productId], references: [id])
+  quantity     Int
+  plan         SubscriptionPlan
+  frequency    SubscriptionFrequency  @default(DAILY)
+  startDate    DateTime
+  endDate      DateTime
+  status       SubscriptionStatus     @default(ACTIVE)
+  cancelledAt  DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  items      SubscriptionItem[]
+  deliveries SubscriptionDelivery[]
+  pauses     SubscriptionPause[]
+  bills      Bill[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// Kept separate from Subscription's single product/quantity so a subscription
+// can later carry multiple products without a schema redesign.
+model SubscriptionItem {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  quantity       Int
+
+  @@index([subscriptionId])
+}
+
+model SubscriptionPause {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  startDate      DateTime
+  endDate        DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([subscriptionId])
+}
+
+enum DeliveryRecordStatus {
+  SCHEDULED
+  DELIVERED
+  SKIPPED
+  PAUSED
+  NOT_DELIVERED
+  FAILED
+}
+
+// The subscription delivery ledger: one row per expected delivery date.
+// This is the sole source of truth for subscription billing (Rule 6).
+model SubscriptionDelivery {
+  id             String               @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription         @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  scheduledDate  DateTime
+  productId      String
+  quantity       Int
+  unitPrice      Decimal              @db.Decimal(10, 2)
+  status         DeliveryRecordStatus @default(SCHEDULED)
+  reason         String?
+  billable       Boolean              @default(true)
+  billId         String?
+  bill           Bill?                @relation(fields: [billId], references: [id])
+  deliveredAt    DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  assignment DeliveryAssignment?
+
+  @@unique([subscriptionId, scheduledDate])
+  @@index([subscriptionId])
+  @@index([scheduledDate])
+  @@index([billId])
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+enum BillStatus {
+  PENDING
+  PAID
+  FAILED
+  OVERDUE
+}
+
+model Bill {
+  id                String       @id @default(cuid())
+  customerId        String
+  customer          Customer     @relation(fields: [customerId], references: [id])
+  subscriptionId    String
+  subscription      Subscription @relation(fields: [subscriptionId], references: [id])
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  billableDays       Int
+  skippedDays        Int
+  pausedDays         Int
+  nonDeliveryDays    Int
+  subtotal           Decimal      @db.Decimal(10, 2)
+  discountAmount     Decimal      @db.Decimal(10, 2) @default(0)
+  taxAmount          Decimal      @db.Decimal(10, 2) @default(0)
+  deliveryCharge     Decimal      @db.Decimal(10, 2) @default(0)
+  totalAmount        Decimal      @db.Decimal(10, 2)
+  status             BillStatus   @default(PENDING)
+  billDate           DateTime     @default(now())
+  dueDate            DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  deliveries SubscriptionDelivery[]
+  payment    Payment?
+
+  @@unique([subscriptionId, billingPeriodStart, billingPeriodEnd])
+  @@index([customerId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Payments
+// ---------------------------------------------------------------------------
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  OVERDUE
+}
+
+enum PaymentTarget {
+  ORDER
+  BILL
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  target          PaymentTarget
+  orderId         String?       @unique
+  order           Order?        @relation(fields: [orderId], references: [id])
+  billId          String?       @unique
+  bill            Bill?         @relation(fields: [billId], references: [id])
+  amount          Decimal       @db.Decimal(10, 2)
+  status          PaymentStatus @default(PENDING)
+  provider        String
+  providerOrderId String?
+  providerPaymentId String?     @unique
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  transactions PaymentTransaction[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// Every raw provider event (create, verify, webhook) is appended here.
+// providerEventId is unique so a duplicate webhook delivery is a no-op (Rule 9).
+model PaymentTransaction {
+  id              String   @id @default(cuid())
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  providerEventId String   @unique
+  type            String
+  rawPayload      Json
+  createdAt       DateTime @default(now())
+
+  @@index([paymentId])
+}
+
+// ---------------------------------------------------------------------------
+// Delivery execution
+// ---------------------------------------------------------------------------
+
+enum DeliveryAssignmentStatus {
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
+model DeliveryAssignment {
+  id                     String                   @id @default(cuid())
+  deliveryPersonId       String?
+  deliveryPerson         DeliveryPerson?          @relation(fields: [deliveryPersonId], references: [id])
+  orderId                String?                  @unique
+  order                  Order?                   @relation(fields: [orderId], references: [id])
+  subscriptionDeliveryId String?                  @unique
+  subscriptionDelivery   SubscriptionDelivery?    @relation(fields: [subscriptionDeliveryId], references: [id])
+  status                 DeliveryAssignmentStatus @default(ASSIGNED)
+  assignedAt             DateTime                 @default(now())
+  outForDeliveryAt       DateTime?
+  deliveredAt            DateTime?
+  failedAt               DateTime?
+  failureReason          String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  @@index([deliveryPersonId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Non-delivery days
+// ---------------------------------------------------------------------------
+
+model WeeklyNonDeliveryDay {
+  id        String @id @default(cuid())
+  // 0 = Sunday .. 6 = Saturday
+  dayOfWeek Int    @unique
+}
+
+model BusinessClosure {
+  id     String   @id @default(cuid())
+  date   DateTime @unique
+  reason String?
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  customerId String
+  customer   Customer            @relation(fields: [customerId], references: [id])
+  event      String
+  channel    NotificationChannel
+  payload    Json
+  status     NotificationStatus  @default(PENDING)
+  attempts   Int                 @default(0)
+  lastError  String?
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Business settings (Rule 4 — never hard-code business rules)
+// ---------------------------------------------------------------------------
+
+model BusinessSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Idempotency for scheduled jobs (Rule 9)
+// ---------------------------------------------------------------------------
+
+model JobRun {
+  id        String   @id @default(cuid())
+  jobName   String
+  runKey    String
+  status    String
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  error     String?
+
+  @@unique([jobName, runKey])
+}
