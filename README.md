@@ -43,9 +43,34 @@ delivery-radius validation, admin operations, delivery-person workflow).
   cutoff, the 21:00 skip deadline, subscription end-date calculation
   (including month-end dates), and the billing arithmetic.
 
+## What's implemented (frontend)
+
+`frontend/` — a single React + Vite + TypeScript + Tailwind app serving all
+three roles from one codebase, each with its own auth session and layout:
+
+- **Customer app** (`/`): custom KS MILK visual identity (Fraunces display
+  serif + Inter, moss/cream/clay palette — not a generic template), a
+  mobile-first bottom-nav layout with a desktop top-nav, and screens for
+  login/register (with "use my location" + server-side radius check),
+  browse/cart/checkout, order history + detail, subscriptions (create,
+  view ledger, skip, pause, cancel), bills (view, pay), addresses, profile.
+- **Admin panel** (`/admin`): dark sidebar console — dashboard metrics,
+  orders (search/filter/assign/cancel), subscriptions, products (create,
+  reprice inline, deactivate), deliveries, delivery-team management,
+  payments, reports (date-filtered), business settings editor.
+- **Delivery-person panel** (`/delivery`): large-tap-target mobile flow —
+  today's assignments with one-tap call, out-for-delivery/delivered/failed
+  (with mandatory reason) actions.
+- Every screen has loading, empty, and error states — not just the happy
+  path. Google SSO is wired into the login flow wherever `VITE_GOOGLE_CLIENT_ID`
+  is set.
+
+Not built on the frontend yet: OTP-based password reset UI, a real payment
+provider's hosted checkout redirect (the pay button currently calls the
+backend's dev payment adapter), CSV/PDF export for reports.
+
 ## Not yet built (explicitly, so scope is honest)
 
-- Frontend apps (customer, admin, delivery-person) — not started yet.
 - A real payment provider integration (Razorpay/etc.) — the abstraction and
   dev adapter are in place; wiring a live provider needs real credentials.
 - Real SMS/email/push notification providers — same, dev/log adapter only.
@@ -55,6 +80,8 @@ delivery-radius validation, admin operations, delivery-person workflow).
 - CI pipeline, production monitoring/alerting.
 
 ## Local development
+
+Backend:
 
 ```bash
 cd backend
@@ -67,6 +94,17 @@ npm run dev
 
 Tests: `npm test` (no database required — the tests cover pure business
 logic with the DB layer mocked/isolated).
+
+Frontend:
+
+```bash
+cd frontend
+cp .env.example .env   # VITE_API_URL should point at the backend, e.g. http://localhost:4000/api
+npm install
+npm run dev
+```
+
+Customer app at `/`, admin console at `/admin`, delivery panel at `/delivery`.
 
 ## Deployment (Railway or Render)
 
