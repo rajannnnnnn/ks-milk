@@ -13,6 +13,7 @@ import {
 } from "../domain/auth";
 import { authenticate } from "../middleware/auth";
 import { verifyGoogleIdToken } from "../domain/googleSso";
+import { verifyWidgetAccessToken } from "../domain/msg91Widget";
 
 export const authRouter = Router();
 
@@ -210,6 +211,42 @@ authRouter.post("/google/customer", async (req, res, next) => {
     const accessToken = signAccessToken({ userId: user.id, role: user.role });
     const refreshToken = await issueRefreshToken(user.id);
     res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role }, accessToken, refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Customer OTP login via the MSG91 Widget: the widget itself (client-side)
+// sends and verifies the OTP; this endpoint re-verifies the resulting
+// access-token server-side (Rule 3) before ever trusting the phone number.
+// Auto-provisions a CUSTOMER account on first login, same posture as Google
+// SSO — never auto-creates ADMIN or DELIVERY_PERSON accounts.
+authRouter.post("/otp/login", async (req, res, next) => {
+  try {
+    const { accessToken: widgetToken } = z.object({ accessToken: z.string() }).parse(req.body);
+    const { mobile } = await verifyWidgetAccessToken(widgetToken);
+
+    if (!validateMobile(mobile)) {
+      throw errors.badRequest("The verified mobile number is not a valid 10-digit number.");
+    }
+
+    let user = await prisma.user.findUnique({ where: { mobile } });
+
+    if (user && user.role !== "CUSTOMER") {
+      throw errors.forbidden("This mobile number is already linked to a non-customer account.");
+    }
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: { role: "CUSTOMER", name: "Customer", mobile, customer: { create: {} } },
+      });
+    }
+
+    if (!user.isActive) throw errors.unauthorized("This account has been deactivated.");
+
+    const accessToken = signAccessToken({ userId: user.id, role: user.role });
+    const refreshToken = await issueRefreshToken(user.id);
+    res.json({ user: { id: user.id, name: user.name, mobile: user.mobile, role: user.role }, accessToken, refreshToken });
   } catch (err) {
     next(err);
   }

@@ -21,6 +21,7 @@ const envSchema = z.object({
   PUSH_PROVIDER: z.string().default("dev"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
+  MSG91_AUTH_KEY: z.string().optional().default(""),
 });
 
 export const env = envSchema.parse(process.env);
