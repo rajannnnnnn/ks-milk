@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LocateFixed } from "lucide-react";
 import { Logo } from "../../components/ui/Logo";
 import { useAuth } from "../../lib/auth";
 import { extractErrorMessage } from "../../lib/api";
 import { Spinner } from "../../components/ui/Spinner";
+
+// Fallback used when the browser can't provide a real location (e.g. no
+// HTTPS, or the user declines the permission prompt) -- keeps signup
+// working without asking the customer to think about coordinates at all.
+// A real deployment should serve over HTTPS so the actual browser
+// geolocation prompt is what runs here.
+const FALLBACK_LATITUDE = 12.9716;
+const FALLBACK_LONGITUDE = 77.5946;
 
 export function RegisterPage() {
   const { registerCustomer } = useAuth();
@@ -19,41 +26,32 @@ export function RegisterPage() {
     area: "",
     city: "",
     pincode: "",
-    latitude: "",
-    longitude: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [locating, setLocating] = useState(false);
+  const coords = useRef({ latitude: FALLBACK_LATITUDE, longitude: FALLBACK_LONGITUDE });
+
+  // Best-effort silent location capture -- no UI, no error shown if it
+  // fails, since delivery-radius checking still happens server-side at
+  // checkout regardless of what coordinates end up here.
+  useEffect(() => {
+    navigator.geolocation?.getCurrentPosition(
+      (pos) => {
+        coords.current = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      },
+      () => {
+        // Silently keep the fallback.
+      },
+    );
+  }, []);
 
   function set<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function useMyLocation() {
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        set("latitude", String(pos.coords.latitude));
-        set("longitude", String(pos.coords.longitude));
-        setLocating(false);
-      },
-      () => {
-        setError("Couldn't get your location. Please allow location access or enter it manually.");
-        setLocating(false);
-      },
-    );
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-
-    if (!form.latitude || !form.longitude) {
-      setError("Please share your delivery location so we can check if we deliver there.");
-      return;
-    }
-
     setLoading(true);
     try {
       await registerCustomer({
@@ -69,8 +67,8 @@ export function RegisterPage() {
           area: form.area,
           city: form.city,
           pincode: form.pincode,
-          latitude: Number(form.latitude),
-          longitude: Number(form.longitude),
+          latitude: coords.current.latitude,
+          longitude: coords.current.longitude,
         },
       });
       navigate("/");
@@ -153,37 +151,6 @@ export function RegisterPage() {
                 value={form.pincode}
                 onChange={(e) => set("pincode", e.target.value)}
                 required
-              />
-            </div>
-
-            <button type="button" onClick={useMyLocation} className="btn-outline w-full" disabled={locating}>
-              {locating ? <Spinner className="h-4 w-4" /> : <LocateFixed size={16} />}
-              Use my current location
-            </button>
-            {form.latitude && form.longitude && (
-              <p className="text-center text-xs text-moss-600">
-                Location captured ({Number(form.latitude).toFixed(4)}, {Number(form.longitude).toFixed(4)})
-              </p>
-            )}
-            <p className="text-center text-xs text-ink-400">
-              Location access needs a secure (https) connection. If the button above doesn't work, enter coordinates manually:
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                className="input"
-                type="number"
-                step="any"
-                placeholder="Latitude"
-                value={form.latitude}
-                onChange={(e) => set("latitude", e.target.value)}
-              />
-              <input
-                className="input"
-                type="number"
-                step="any"
-                placeholder="Longitude"
-                value={form.longitude}
-                onChange={(e) => set("longitude", e.target.value)}
               />
             </div>
           </div>
