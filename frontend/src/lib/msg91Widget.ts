@@ -1,8 +1,12 @@
-// Thin wrapper around MSG91's OTP Provider widget (loaded via the <script>
-// tag in index.html). The widget itself talks to MSG91 and runs the real
-// SMS OTP challenge in the browser; we only read back its result. The
-// backend independently re-verifies the resulting access-token with MSG91
-// before trusting it for anything (see backend/src/domain/msg91Widget.ts).
+// Thin wrapper around MSG91's OTP Provider widget. The widget itself talks
+// to MSG91 and runs the real SMS OTP challenge in the browser; we only read
+// back its result. The backend independently re-verifies the resulting
+// access-token with MSG91 before trusting it for anything (see
+// backend/src/domain/msg91Widget.ts).
+//
+// Script loading (including the two-host fallback) mirrors MSG91's own
+// widget integration snippet exactly, as pulled from the widget's dashboard.
+const WIDGET_SCRIPT_URLS = ["https://verify.msg91.com/otp-provider.js", "https://verify.phone91.com/otp-provider.js"];
 
 interface Msg91SuccessResult {
   type?: string;
@@ -42,24 +46,51 @@ export const MSG91_WIDGET_ID = import.meta.env.VITE_MSG91_WIDGET_ID ?? "";
 export const MSG91_TOKEN_AUTH = import.meta.env.VITE_MSG91_TOKEN_AUTH ?? "";
 export const MSG91_CONFIGURED = Boolean(MSG91_WIDGET_ID && MSG91_TOKEN_AUTH);
 
-let initialized = false;
+let loadPromise: Promise<void> | null = null;
 
-function ensureInitialized() {
-  if (initialized) return;
-  if (!MSG91_CONFIGURED || typeof window.initSendOTP !== "function") return;
-  window.initSendOTP({
-    widgetId: MSG91_WIDGET_ID,
-    tokenAuth: MSG91_TOKEN_AUTH,
-    exposeMethods: true,
-    success: () => {},
-    failure: () => {},
+function loadWidgetScript(urls: string[]): Promise<void> {
+  if (loadPromise) return loadPromise;
+  loadPromise = new Promise((resolve, reject) => {
+    let i = 0;
+    function attempt() {
+      const script = document.createElement("script");
+      script.src = urls[i];
+      script.async = true;
+      script.onload = () => {
+        if (typeof window.initSendOTP !== "function") {
+          reject(new Error("OTP widget script loaded but did not register."));
+          return;
+        }
+        window.initSendOTP({
+          widgetId: MSG91_WIDGET_ID,
+          tokenAuth: MSG91_TOKEN_AUTH,
+          exposeMethods: true,
+          success: () => {},
+          failure: () => {},
+        });
+        resolve();
+      };
+      script.onerror = () => {
+        i++;
+        if (i < urls.length) {
+          attempt();
+        } else {
+          reject(new Error("Could not load the OTP widget."));
+        }
+      };
+      document.head.appendChild(script);
+    }
+    attempt();
   });
-  initialized = true;
+  return loadPromise;
 }
 
-export function sendMobileOtp(mobile: string): Promise<void> {
+export async function sendMobileOtp(mobile: string): Promise<void> {
+  if (!MSG91_CONFIGURED) {
+    throw new Error("OTP service is not configured on this deployment.");
+  }
+  await loadWidgetScript(WIDGET_SCRIPT_URLS);
   return new Promise((resolve, reject) => {
-    ensureInitialized();
     if (typeof window.sendOtp !== "function") {
       reject(new Error("OTP service is unavailable right now. Please try again shortly."));
       return;
