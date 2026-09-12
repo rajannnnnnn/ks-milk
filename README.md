@@ -127,6 +127,70 @@ Either way, after first deploy run the seed script once (via the platform's
 shell/one-off job feature) if you want demo data, and **change the seeded
 admin password immediately**.
 
+## Deployment on a bare Docker host (e.g. EC2)
+
+`docker-compose.yml` runs postgres + backend + frontend/nginx together on a
+single host. Copy `.env.example`-style values into a `.env` next to it, then:
+
+```bash
+docker compose --env-file .env build
+docker compose --env-file .env up -d
+docker compose --env-file .env exec backend npm run prisma:seed   # first run only
+```
+
+### Known pitfalls (all fixed in this repo, but worth knowing if you fork it)
+
+- **Prisma's query engine needs OpenSSL.** `node:20-slim` (used in
+  `backend/Dockerfile`) doesn't ship it, and the failure only shows up at
+  *runtime* on the first real DB query, not at build time — `prisma
+  migrate deploy` during the build stage works fine, then the server
+  crashes the moment a request actually hits the database. Fixed by
+  installing `openssl` via `apt-get` in both Dockerfile stages. If you swap
+  base images, re-check this.
+- **`prisma/migrations/` must actually be committed.** A missing migrations
+  folder means `prisma migrate deploy` silently has nothing to apply against
+  a fresh database — everything looks fine until the first request that
+  touches a table that was never created (502s downstream). Generate it
+  locally with `npx prisma migrate dev --name init` against a real Postgres
+  and commit the output; don't rely on `db push` for production deploys.
+- **Port 80 conflicts during first-time setup on a plain VM.** If you're
+  scripting a bootstrap (e.g. EC2 user-data) that uses a placeholder web
+  server (nginx) to show progress/errors while `docker compose build` runs
+  in the background, stop that placeholder *after* the build finishes and
+  *before* `docker compose up -d`, not before the build starts — otherwise
+  you get an "address already in use" error, or lose your progress page
+  during the slow part.
+- **Don't require a full street/city breakdown for addresses.** Real
+  addresses often don't split cleanly; `street` and `city` are optional
+  (default `""`) in both `POST /auth/register/customer` and
+  `POST /addresses` for this reason. `houseNo`, `area`, and `pincode` are
+  required.
+- **MSG91 OTP widget needs *two* separate credentials, from two different
+  dashboard screens.** `MSG91_AUTH_KEY` (backend-only, used to call
+  `POST /widget/verifyAccessToken` server-side) comes from the account-level
+  Auth Key screen. `VITE_MSG91_WIDGET_ID` and `VITE_MSG91_TOKEN_AUTH`
+  (frontend build args, baked into the JS bundle) come from the specific
+  OTP widget's own "Integration"/"Code" tab — a different screen entirely.
+  Without the latter two, the widget script never initializes and the "Send
+  OTP" button in the UI stays inert; registration is hard-blocked without a
+  real, MSG91-verified OTP (see `backend/src/routes/auth.ts`,
+  `POST /auth/otp/verify` and the `mobileVerificationToken` check in
+  `POST /auth/register/customer`) — there is no way to create an account by
+  skipping this, except the explicit dev-only bypass described below.
+- **Local development without MSG91 configured.** If `MSG91_AUTH_KEY` is
+  unset and `NODE_ENV != production`, `POST /auth/otp/verify` accepts a raw
+  `{ "mobile": "..." }` body instead of a widget token, so you can develop
+  the rest of the app without real SMS costs. This path is dead code the
+  moment `MSG91_AUTH_KEY` is set or `NODE_ENV=production` — never rely on it
+  for anything but local dev.
+- **EC2 without SSH access is hard to debug blind.** If you provision
+  without an SSH-reachable network path, `cloud-init`/user-data output often
+  isn't reliably visible via `aws ec2 get-console-output` either
+  (Nitro-based instances especially). Have your bootstrap script write
+  build/runtime failures (docker compose ps, backend/frontend logs) directly
+  to the page nginx serves on failure, so the deployment is self-diagnosing
+  from a browser alone.
+
 ## Environment variables
 
 See `backend/.env.example` for the full list. Notably:
