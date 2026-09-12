@@ -22,6 +22,7 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   MSG91_AUTH_KEY: z.string().optional().default(""),
+  MOBILE_VERIFICATION_TTL: z.string().default("15m"),
 });
 
 export const env = envSchema.parse(process.env);

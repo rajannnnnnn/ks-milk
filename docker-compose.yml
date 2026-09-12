@@ -45,6 +45,8 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: /api
+        VITE_MSG91_WIDGET_ID: ${MSG91_WIDGET_ID:-}
+        VITE_MSG91_TOKEN_AUTH: ${MSG91_TOKEN_AUTH:-}
     restart: unless-stopped
     depends_on:
       - backend

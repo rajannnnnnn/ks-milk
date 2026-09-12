@@ -25,6 +25,7 @@ interface RegisterPayload {
   mobile: string;
   email?: string;
   password: string;
+  mobileVerificationToken: string;
   address: {
     name: string;
     mobile: string;

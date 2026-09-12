@@ -10,10 +10,13 @@ import {
   issueRefreshToken,
   rotateRefreshToken,
   revokeRefreshToken,
+  signMobileVerificationToken,
+  verifyMobileVerificationToken,
 } from "../domain/auth";
 import { authenticate } from "../middleware/auth";
 import { verifyGoogleIdToken } from "../domain/googleSso";
 import { verifyWidgetAccessToken } from "../domain/msg91Widget";
+import { env } from "../config/env";
 
 export const authRouter = Router();
 
@@ -22,6 +25,8 @@ const registerSchema = z.object({
   mobile: z.string(),
   email: z.string().email().optional(),
   password: z.string().min(8),
+  // Proof of OTP verification for `mobile`, obtained from POST /auth/otp/verify.
+  mobileVerificationToken: z.string().min(1),
   address: z.object({
     name: z.string().min(1),
     mobile: z.string(),
@@ -41,6 +46,8 @@ authRouter.post("/register/customer", async (req, res, next) => {
     if (!validateMobile(body.mobile)) {
       throw errors.badRequest("Please enter a valid 10-digit mobile number.");
     }
+
+    verifyMobileVerificationToken(body.mobileVerificationToken, body.mobile);
 
     const existing = await prisma.user.findUnique({ where: { mobile: body.mobile } });
     if (existing) {
@@ -211,6 +218,47 @@ authRouter.post("/google/customer", async (req, res, next) => {
     const accessToken = signAccessToken({ userId: user.id, role: user.role });
     const refreshToken = await issueRefreshToken(user.id);
     res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role }, accessToken, refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Verifies an OTP just completed via the MSG91 Widget and, if valid, issues a
+// short-lived token proving this mobile number was verified. Used to gate
+// POST /auth/register/customer -- the widget's own client-side "verified"
+// state is never trusted on its own (Rule 3), so this re-checks with MSG91
+// server-side before the frontend is allowed to submit the signup form.
+const otpVerifySchema = z.object({
+  accessToken: z.string().optional(),
+  // Dev-only bypass field -- see note below. Ignored whenever a real widget
+  // accessToken is provided or MSG91 is configured.
+  mobile: z.string().optional(),
+});
+
+authRouter.post("/otp/verify", async (req, res, next) => {
+  try {
+    const body = otpVerifySchema.parse(req.body);
+    let mobile: string;
+
+    if (body.accessToken) {
+      ({ mobile } = await verifyWidgetAccessToken(body.accessToken));
+    } else if (body.mobile && env.NODE_ENV !== "production" && !env.MSG91_AUTH_KEY) {
+      // Dev-only bypass: with no MSG91_AUTH_KEY configured there is no real
+      // widget to complete an OTP against, so local development would
+      // otherwise be blocked entirely. Never available once MSG91_AUTH_KEY
+      // is set or NODE_ENV=production (Rule 3) -- production always goes
+      // through the branch above, which re-verifies with MSG91 server-side.
+      mobile = body.mobile;
+    } else {
+      throw errors.badRequest("A widget access token is required to verify your mobile number.");
+    }
+
+    if (!validateMobile(mobile)) {
+      throw errors.badRequest("The verified mobile number is not a valid 10-digit number.");
+    }
+
+    const mobileVerificationToken = signMobileVerificationToken(mobile);
+    res.json({ mobile, mobileVerificationToken });
   } catch (err) {
     next(err);
   }

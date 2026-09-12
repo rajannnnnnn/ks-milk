@@ -33,6 +33,34 @@ export function verifyAccessToken(token: string): TokenPayload {
   return jwt.verify(token, env.JWT_ACCESS_SECRET) as unknown as TokenPayload;
 }
 
+interface MobileVerificationPayload {
+  mobile: string;
+  purpose: "mobile_verified";
+}
+
+// Short-lived proof that an OTP was just verified for this mobile number
+// (issued by POST /auth/otp/verify). Registration requires this token and
+// checks it matches the submitted mobile, so OTP verification can't be
+// skipped or spoofed for a different number (Rule 3).
+export function signMobileVerificationToken(mobile: string): string {
+  const payload: MobileVerificationPayload = { mobile, purpose: "mobile_verified" };
+  return jwt.sign(payload, env.JWT_ACCESS_SECRET, {
+    expiresIn: env.MOBILE_VERIFICATION_TTL as SignOptions["expiresIn"],
+  });
+}
+
+export function verifyMobileVerificationToken(token: string, expectedMobile: string): void {
+  let payload: MobileVerificationPayload;
+  try {
+    payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as unknown as MobileVerificationPayload;
+  } catch {
+    throw errors.badRequest("Mobile verification has expired. Please verify your mobile number again.");
+  }
+  if (payload.purpose !== "mobile_verified" || payload.mobile !== expectedMobile) {
+    throw errors.badRequest("Mobile verification does not match the mobile number entered.");
+  }
+}
+
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
