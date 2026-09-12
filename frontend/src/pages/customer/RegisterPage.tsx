@@ -80,7 +80,15 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center bg-cream-50 px-6 py-10">
+    <div className="relative flex min-h-screen flex-col items-center bg-cream-50 px-6 py-10">
+      <div className="absolute right-4 top-4 z-10 flex gap-2 text-xs font-semibold">
+        <a href="/admin/login" className="rounded-full bg-white px-3 py-1.5 text-ink-600 shadow-soft hover:bg-cream-100">
+          Admin
+        </a>
+        <a href="/delivery/login" className="rounded-full bg-white px-3 py-1.5 text-ink-600 shadow-soft hover:bg-cream-100">
+          Delivery partner
+        </a>
+      </div>
       <div className="mb-6">
         <Logo />
       </div>

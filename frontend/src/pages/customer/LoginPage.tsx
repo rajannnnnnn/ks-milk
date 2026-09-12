@@ -28,7 +28,15 @@ export function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen md:grid-cols-2">
+    <div className="relative grid min-h-screen md:grid-cols-2">
+      <div className="absolute right-4 top-4 z-10 flex gap-2 text-xs font-semibold">
+        <a href="/admin/login" className="rounded-full bg-white/90 px-3 py-1.5 text-ink-600 shadow-soft hover:bg-white">
+          Admin
+        </a>
+        <a href="/delivery/login" className="rounded-full bg-white/90 px-3 py-1.5 text-ink-600 shadow-soft hover:bg-white">
+          Delivery partner
+        </a>
+      </div>
       <div className="relative hidden overflow-hidden bg-moss-800 md:flex md:flex-col md:justify-between md:p-12">
         <div className="absolute inset-0 opacity-20" style={{
           backgroundImage: "radial-gradient(circle at 20% 20%, white 0, transparent 40%), radial-gradient(circle at 80% 60%, white 0, transparent 35%)",
