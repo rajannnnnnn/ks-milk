@@ -42,6 +42,27 @@ declare global {
   }
 }
 
+// MSG91's failure callbacks pass all sorts of shapes (string, {message},
+// {type,message}, plain object) depending on the failure. Surface whatever
+// real reason it gives instead of collapsing everything to a generic
+// message -- that's the only way to actually diagnose a live OTP failure.
+function toErrorMessage(err: unknown, fallback: string): string {
+  // eslint-disable-next-line no-console
+  console.error("MSG91 widget error:", err);
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const record = err as Record<string, unknown>;
+    if (typeof record.message === "string") return record.message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      // fall through
+    }
+  }
+  return fallback;
+}
+
 export const MSG91_WIDGET_ID = import.meta.env.VITE_MSG91_WIDGET_ID ?? "";
 export const MSG91_TOKEN_AUTH = import.meta.env.VITE_MSG91_TOKEN_AUTH ?? "";
 export const MSG91_CONFIGURED = Boolean(MSG91_WIDGET_ID && MSG91_TOKEN_AUTH);
@@ -129,7 +150,7 @@ export async function sendMobileOtp(mobile: string): Promise<void> {
     window.sendOtp(
       `91${mobile}`,
       () => resolve(),
-      (err) => reject(err instanceof Error ? err : new Error("Could not send OTP. Please try again.")),
+      (err) => reject(new Error(toErrorMessage(err, "Could not send OTP. Please try again."))),
     );
   });
 }
@@ -143,7 +164,7 @@ export function verifyMobileOtp(otp: string): Promise<string> {
     window.verifyOtp(
       otp,
       (data) => resolve(data.message),
-      (err) => reject(err instanceof Error ? err : new Error("Incorrect OTP. Please try again.")),
+      (err) => reject(new Error(toErrorMessage(err, "Incorrect OTP. Please try again."))),
     );
   });
 }
@@ -154,10 +175,13 @@ export function resendMobileOtp(): Promise<void> {
       reject(new Error("OTP service is unavailable right now. Please try again shortly."));
       return;
     }
+    // Passing an explicit channel risks an "invalid channel" rejection if it
+    // doesn't match what this widget expects; MSG91 defaults to the
+    // channel used for the original send when no channel is passed.
     window.retryOtp(
-      "text",
+      undefined,
       () => resolve(),
-      (err) => reject(err instanceof Error ? err : new Error("Could not resend OTP. Please try again.")),
+      (err) => reject(new Error(toErrorMessage(err, "Could not resend OTP. Please try again."))),
     );
   });
 }
