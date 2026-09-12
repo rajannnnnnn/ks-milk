@@ -165,6 +165,27 @@ export function RegisterPage() {
                 Location captured ({Number(form.latitude).toFixed(4)}, {Number(form.longitude).toFixed(4)})
               </p>
             )}
+            <p className="text-center text-xs text-ink-400">
+              Location access needs a secure (https) connection. If the button above doesn't work, enter coordinates manually:
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                className="input"
+                type="number"
+                step="any"
+                placeholder="Latitude"
+                value={form.latitude}
+                onChange={(e) => set("latitude", e.target.value)}
+              />
+              <input
+                className="input"
+                type="number"
+                step="any"
+                placeholder="Longitude"
+                value={form.longitude}
+                onChange={(e) => set("longitude", e.target.value)}
+              />
+            </div>
           </div>
 
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

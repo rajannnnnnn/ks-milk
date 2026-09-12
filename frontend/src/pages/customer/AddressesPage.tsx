@@ -112,6 +112,46 @@ export function AddressesPage() {
             Use my current location
           </button>
 
+          <p className="text-center text-xs text-ink-400">
+            Location access needs a secure (https) connection. If the button above doesn't work, enter coordinates manually:
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              className="input"
+              type="number"
+              step="any"
+              placeholder="Latitude"
+              value={form.latitude}
+              onChange={(e) => set("latitude", e.target.value)}
+              onBlur={async () => {
+                if (form.latitude && form.longitude) {
+                  try {
+                    setRadiusInfo(await checkRadius.mutateAsync({ latitude: Number(form.latitude), longitude: Number(form.longitude) }));
+                  } catch {
+                    // non-fatal; server re-validates on submit
+                  }
+                }
+              }}
+            />
+            <input
+              className="input"
+              type="number"
+              step="any"
+              placeholder="Longitude"
+              value={form.longitude}
+              onChange={(e) => set("longitude", e.target.value)}
+              onBlur={async () => {
+                if (form.latitude && form.longitude) {
+                  try {
+                    setRadiusInfo(await checkRadius.mutateAsync({ latitude: Number(form.latitude), longitude: Number(form.longitude) }));
+                  } catch {
+                    // non-fatal; server re-validates on submit
+                  }
+                }
+              }}
+            />
+          </div>
+
           {radiusInfo && (
             <p className={`text-center text-xs ${radiusInfo.allowed ? "text-moss-600" : "text-clay-600"}`}>
               {radiusInfo.allowed
