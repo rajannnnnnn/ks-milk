@@ -48,6 +48,27 @@ export const MSG91_CONFIGURED = Boolean(MSG91_WIDGET_ID && MSG91_TOKEN_AUTH);
 
 let loadPromise: Promise<void> | null = null;
 
+// MSG91's widget doesn't expose window.sendOtp/verifyOtp/retryOtp
+// synchronously when initSendOTP() returns -- it wires them up shortly
+// after, internally. Poll briefly rather than assuming they exist the
+// instant the script's onload fires.
+function waitForExposedMethods(timeoutMs = 5000, intervalMs = 100): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    (function poll() {
+      if (typeof window.sendOtp === "function") {
+        resolve();
+        return;
+      }
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error("OTP widget did not finish initializing. Please refresh and try again."));
+        return;
+      }
+      setTimeout(poll, intervalMs);
+    })();
+  });
+}
+
 function loadWidgetScript(urls: string[]): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = new Promise((resolve, reject) => {
@@ -68,7 +89,7 @@ function loadWidgetScript(urls: string[]): Promise<void> {
           success: () => {},
           failure: () => {},
         });
-        resolve();
+        waitForExposedMethods().then(resolve, reject);
       };
       script.onerror = () => {
         i++;
@@ -83,6 +104,15 @@ function loadWidgetScript(urls: string[]): Promise<void> {
     attempt();
   });
   return loadPromise;
+}
+
+// Best-effort warm-up so the widget is likely already loaded by the time the
+// user clicks "Send OTP" -- call this on mount of the registration page.
+// Errors are swallowed here; sendMobileOtp will surface them for real if the
+// script still isn't ready when actually needed.
+export function preloadWidget(): void {
+  if (!MSG91_CONFIGURED) return;
+  loadWidgetScript(WIDGET_SCRIPT_URLS).catch(() => {});
 }
 
 export async function sendMobileOtp(mobile: string): Promise<void> {

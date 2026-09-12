@@ -4,7 +4,7 @@ import { Logo } from "../../components/ui/Logo";
 import { useAuth } from "../../lib/auth";
 import { api, extractErrorMessage } from "../../lib/api";
 import { Spinner } from "../../components/ui/Spinner";
-import { MSG91_CONFIGURED, sendMobileOtp, verifyMobileOtp, resendMobileOtp } from "../../lib/msg91Widget";
+import { MSG91_CONFIGURED, preloadWidget, sendMobileOtp, verifyMobileOtp, resendMobileOtp } from "../../lib/msg91Widget";
 
 // Fallback used when the browser can't provide a real location (e.g. no
 // HTTPS, or the user declines the permission prompt) -- keeps signup
@@ -46,6 +46,10 @@ export function RegisterPage() {
     const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
     return () => clearTimeout(timer);
   }, [resendCooldown]);
+
+  useEffect(() => {
+    preloadWidget();
+  }, []);
 
   const mobileValid = /^[6-9]\d{9}$/.test(form.mobile);
 
