@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ksmilk
+      POSTGRES_PASSWORD: ksmilk
+      POSTGRES_DB: ksmilk
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ksmilk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://ksmilk:ksmilk@postgres:5432/ksmilk?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      BUSINESS_LAT: "12.9716"
+      BUSINESS_LNG: "77.5946"
+      BUSINESS_TIMEZONE: Asia/Kolkata
+      PAYMENT_PROVIDER: dev
+      SMS_PROVIDER: dev
+      EMAIL_PROVIDER: dev
+      PUSH_PROVIDER: dev
+      CORS_ORIGIN: "*"
+      GOOGLE_CLIENT_ID: ""
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
